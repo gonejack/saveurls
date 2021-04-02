@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -119,6 +120,22 @@ func run(c *cobra.Command, files []string) error {
 				}
 
 				rename := fmt.Sprintf("%s.html", title)
+				index := 1
+				for {
+					file, err := os.OpenFile(rename, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+					if err == nil {
+						_ = file.Close()
+						break
+					}
+					if errors.Is(err, os.ErrExist) {
+						rename = fmt.Sprintf("%s[%d].html", title, index)
+						index++
+						continue
+					} else {
+						log.Printf("create file %s fail: %s", rename, err)
+						return err
+					}
+				}
 				err = os.Rename(target, rename)
 				if err != nil {
 					log.Printf("rename %s => %s fail: %s", target, rename, err)
