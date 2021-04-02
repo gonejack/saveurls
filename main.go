@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -142,6 +143,12 @@ func run(c *cobra.Command, files []string) error {
 					return
 				}
 
+				err = pathHTML(src, rename)
+				if err != nil {
+					log.Printf("patch %s fail: %s", rename, err)
+					return
+				}
+
 				return nil
 			})
 		}
@@ -212,6 +219,75 @@ func download(src, path string) (err error) {
 	}
 
 	return
+}
+func pathHTML(src, path string) (err error) {
+	fd, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	doc, err := goquery.NewDocumentFromReader(fd)
+	if err != nil {
+		return
+	}
+	fd.Close()
+
+	doc.Find("img, link").Each(func(i int, e *goquery.Selection) {
+		var attr string
+		switch e.Get(0).Data {
+		case "link":
+			attr = "href"
+		case "img":
+			attr = "src"
+			e.RemoveAttr("loading")
+			e.RemoveAttr("srcset")
+		}
+
+		ref, _ := e.Attr(attr)
+		switch {
+		case ref == "":
+			return
+		case strings.HasPrefix(ref, "data:"):
+			return
+		case strings.HasPrefix(ref, "http://"):
+			return
+		case strings.HasPrefix(ref, "https://"):
+			return
+		default:
+			e.SetAttr(attr, patchReference(src, ref))
+		}
+	})
+
+	html, err := doc.Html()
+	if err != nil {
+		return
+	}
+
+	err = ioutil.WriteFile(path, []byte(html), 0666)
+	if err != nil {
+		return
+	}
+
+	return
+}
+func patchReference(link, ref string) string {
+	refURL, err := url.Parse(ref)
+	if err != nil {
+		return ref
+	}
+
+	linkURL, err := url.Parse(link)
+	if err != nil {
+		return ref
+	}
+
+	if refURL.Host == "" {
+		refURL.Host = linkURL.Host
+	}
+	if refURL.Scheme == "" {
+		refURL.Scheme = linkURL.Scheme
+	}
+
+	return refURL.String()
 }
 
 func main() {
