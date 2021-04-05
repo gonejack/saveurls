@@ -256,6 +256,7 @@ func pathHTML(src, path string) (err error) {
 			e.SetAttr(attr, patchReference(src, ref))
 		}
 	})
+	doc.Find("body").AppendHtml(footer(src))
 
 	html, err := doc.Html()
 	if err != nil {
@@ -288,6 +289,21 @@ func patchReference(link, ref string) string {
 	}
 
 	return refURL.String()
+}
+func footer(link string) string {
+	const tpl = `
+<br/><br/>
+<a style="display: block; display: inline-block; border-top: 1px solid #ccc; padding-top: 5px; color: #666; text-decoration: none;"
+   href="{link}">{link}</a>
+<p style="color:#999;">Save with <a style="color:#666; text-decoration:none; font-weight: bold;" 
+									href="https://github.com/gonejack/saveurls">saveurls</a>
+</p>`
+
+	replacer := strings.NewReplacer(
+		"{link}", link,
+	)
+
+	return replacer.Replace(tpl)
 }
 
 func main() {
