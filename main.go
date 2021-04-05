@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io/ioutil"
 	"strings"
 
@@ -294,13 +295,18 @@ func footer(link string) string {
 	const tpl = `
 <br/><br/>
 <a style="display: block; display: inline-block; border-top: 1px solid #ccc; padding-top: 5px; color: #666; text-decoration: none;"
-   href="{link}">{link}</a>
+   href="{link}">{linkText}</a>
 <p style="color:#999;">Save with <a style="color:#666; text-decoration:none; font-weight: bold;" 
 									href="https://github.com/gonejack/saveurls">saveurls</a>
 </p>`
 
+	linkText, err := url.QueryUnescape(link)
+	if err != nil {
+		linkText = link
+	}
 	replacer := strings.NewReplacer(
 		"{link}", link,
+		"{linkText}", html.EscapeString(linkText),
 	)
 
 	return replacer.Replace(tpl)
