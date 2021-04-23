@@ -5,30 +5,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
-	"io/ioutil"
-	"strings"
-
+	"github.com/PuerkitoBio/goquery"
+	"github.com/gonejack/get"
+	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
-	"io"
+	"html"
+	"io/ioutil"
 	"log"
-	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
-
-	"github.com/PuerkitoBio/goquery"
-	"github.com/dustin/go-humanize"
-	"github.com/schollz/progressbar/v3"
-	"github.com/spf13/cobra"
 )
 
 var (
-	client  http.Client
 	verbose = false
-	prog    = &cobra.Command{
+
+	exec = &cobra.Command{
 		Use:   "saveurls *.txt",
 		Short: "Command line tool for fetching url as html",
 		Run: func(c *cobra.Command, args []string) {
@@ -42,111 +36,71 @@ var (
 
 func init() {
 	log.SetOutput(os.Stdout)
-
-	prog.Flags().SortFlags = false
-	prog.PersistentFlags().SortFlags = false
-	prog.PersistentFlags().BoolVarP(
-		&verbose,
-		"verbose",
-		"v",
-		false,
-		"verbose",
-	)
+	exec.Flags().BoolVarP(&verbose, "verbose", "v", false, "verbose")
 }
 
-func run(c *cobra.Command, files []string) error {
-	if len(files) == 0 {
-		return fmt.Errorf("no url list given")
+func run(c *cobra.Command, texts []string) error {
+	if len(texts) == 0 {
+		return fmt.Errorf("no urls given")
 	}
 
-	for _, fp := range files {
+	var batch = semaphore.NewWeighted(3)
+	var group errgroup.Group
+
+	for _, txt := range texts {
 		if verbose {
-			log.Printf("processing %s", fp)
+			log.Printf("processing %s", txt)
 		}
 
-		fd, err := os.Open(fp)
+		fd, err := os.Open(txt)
 		if err != nil {
 			return err
 		}
 
-		var batch = semaphore.NewWeighted(3)
-		var group errgroup.Group
+		scan := bufio.NewScanner(fd)
+		for scan.Scan() {
+			text := scan.Text()
 
-		scanner := bufio.NewScanner(fd)
-		for scanner.Scan() {
 			_ = batch.Acquire(context.TODO(), 1)
-
-			text := scanner.Text()
-			u, err := url.Parse(text)
-			if err != nil {
-				return err
-			}
-
-			temp, err := os.CreateTemp(".", "temp")
-			if err != nil {
-				return err
-			}
-			_ = temp.Close()
-
-			src := u.String()
-			target := temp.Name()
 			group.Go(func() (err error) {
 				defer batch.Release(1)
 
+				uri, err := url.Parse(text)
+				if err != nil {
+					return err
+				}
+				temp, err := os.CreateTemp("", "temp")
+				if err != nil {
+					return err
+				}
+
+				ref := uri.String()
+				tmp := temp.Name()
+
+				defer func() {
+					temp.Close()
+					os.Remove(tmp)
+				}()
+
 				if verbose {
-					log.Printf("fetch %s", src)
+					log.Printf("fetch %s", ref)
 				}
 
-				err = download(src, target)
+				err = get.Download(ref, tmp, time.Minute)
 				if err != nil {
-					log.Printf("download %s fail: %s", src, err)
+					log.Printf("download %s fail: %s", ref, err)
 					return
 				}
 
-				fd, err := os.Open(target)
+				htm, err := renameAsHTML(tmp)
 				if err != nil {
-					log.Printf("cannot open %s fail: %s", target, err)
-					return
-				}
-				defer fd.Close()
-
-				doc, err := goquery.NewDocumentFromReader(fd)
-				if err != nil {
-					log.Printf("parse %s fail: %s", target, err)
+					log.Printf("rename %s failed: %s", tmp, err)
 					return
 				}
 
-				title := doc.Find("title").Text()
-				if title != "" {
-					title = strings.ReplaceAll(title, "/", "_")
-				}
-
-				rename := fmt.Sprintf("%s.html", title)
-				index := 1
-				for {
-					file, err := os.OpenFile(rename, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
-					if err == nil {
-						_ = file.Close()
-						break
-					}
-					if errors.Is(err, os.ErrExist) {
-						rename = fmt.Sprintf("%s[%d].html", title, index)
-						index++
-						continue
-					} else {
-						log.Printf("create file %s fail: %s", rename, err)
-						return err
-					}
-				}
-				err = os.Rename(target, rename)
+				err = pathHTML(ref, htm)
 				if err != nil {
-					log.Printf("rename %s => %s fail: %s", target, rename, err)
-					return
-				}
-
-				err = pathHTML(src, rename)
-				if err != nil {
-					log.Printf("patch %s fail: %s", rename, err)
+					log.Printf("patch %s fail: %s", htm, err)
 					return
 				}
 
@@ -160,66 +114,45 @@ func run(c *cobra.Command, files []string) error {
 	return nil
 }
 
-func download(src, path string) (err error) {
-	timeout, cancel := context.WithTimeout(context.TODO(), time.Minute*2)
-	defer cancel()
+func renameAsHTML(tmp string) (rename string, err error) {
+	fd, err := os.Open(tmp)
+	if err != nil {
+		return
+	}
+	defer fd.Close()
 
-	info, err := os.Stat(path)
-	if err == nil && info.Size() > 0 {
-		headReq, headErr := http.NewRequestWithContext(timeout, http.MethodHead, src, nil)
-		if headErr != nil {
-			return headErr
+	doc, err := goquery.NewDocumentFromReader(fd)
+	if err != nil {
+		log.Printf("parse %s fail: %s", tmp, err)
+		return
+	}
+
+	title := doc.Find("title").Text()
+	if title != "" {
+		title = strings.ReplaceAll(title, "/", "_")
+	}
+
+	index := 0
+	for {
+		if index > 0 {
+			rename = fmt.Sprintf("%s[%d].html", title, index)
+		} else {
+			rename = fmt.Sprintf("%s.html", title)
 		}
-		resp, headErr := client.Do(headReq)
-		if headErr == nil && info.Size() == resp.ContentLength {
-			return // skip download
+
+		file, err := os.OpenFile(rename, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+
+		switch {
+		case errors.Is(err, os.ErrExist):
+			index += 1
+			continue
+		case err == nil:
+			_ = file.Close()
+			return rename, os.Rename(tmp, rename)
+		default:
+			return "", fmt.Errorf("create file %s fail: %s", rename, err)
 		}
 	}
-
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-
-	request, err := http.NewRequestWithContext(timeout, http.MethodGet, src, nil)
-	if err != nil {
-		return
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return
-	}
-	defer response.Body.Close()
-
-	var written int64
-	if verbose {
-		bar := progressbar.NewOptions64(response.ContentLength,
-			progressbar.OptionSetTheme(progressbar.Theme{Saucer: "=", SaucerPadding: ".", BarStart: "|", BarEnd: "|"}),
-			progressbar.OptionSetWidth(10),
-			progressbar.OptionSpinnerType(11),
-			progressbar.OptionShowBytes(true),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetPredictTime(false),
-			progressbar.OptionSetDescription(filepath.Base(src)),
-			progressbar.OptionSetRenderBlankState(true),
-			progressbar.OptionClearOnFinish(),
-		)
-		defer bar.Clear()
-		written, err = io.Copy(io.MultiWriter(file, bar), response.Body)
-	} else {
-		written, err = io.Copy(file, response.Body)
-	}
-
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return fmt.Errorf("response status code %d invalid", response.StatusCode)
-	}
-
-	if err == nil && written < response.ContentLength {
-		err = fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(response.ContentLength)), humanize.Bytes(uint64(written)))
-	}
-
-	return
 }
 func pathHTML(src, path string) (err error) {
 	fd, err := os.Open(path)
@@ -259,27 +192,27 @@ func pathHTML(src, path string) (err error) {
 	})
 	doc.Find("body").AppendHtml(footer(src))
 
-	html, err := doc.Html()
+	htm, err := doc.Html()
 	if err != nil {
 		return
 	}
 
-	err = ioutil.WriteFile(path, []byte(html), 0666)
+	err = ioutil.WriteFile(path, []byte(htm), 0666)
 	if err != nil {
 		return
 	}
 
 	return
 }
-func patchReference(link, ref string) string {
-	refURL, err := url.Parse(ref)
+func patchReference(pageRef, imgRef string) string {
+	refURL, err := url.Parse(imgRef)
 	if err != nil {
-		return ref
+		return imgRef
 	}
 
-	linkURL, err := url.Parse(link)
+	linkURL, err := url.Parse(pageRef)
 	if err != nil {
-		return ref
+		return imgRef
 	}
 
 	if refURL.Host == "" {
@@ -313,5 +246,5 @@ func footer(link string) string {
 }
 
 func main() {
-	_ = prog.Execute()
+	_ = exec.Execute()
 }
