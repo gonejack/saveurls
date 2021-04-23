@@ -5,18 +5,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/PuerkitoBio/goquery"
-	"github.com/gonejack/get"
-	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 	"html"
 	"io/ioutil"
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/gabriel-vasile/mimetype"
+	"github.com/gonejack/get"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 var (
@@ -92,7 +95,22 @@ func run(c *cobra.Command, texts []string) error {
 					return
 				}
 
-				htm, err := renameAsHTML(tmp)
+				mime, err := mimetype.DetectFile(tmp)
+				if err != nil {
+					log.Printf("cannnot detect mime of %s: %s", tmp, err)
+					return
+				}
+
+				if mime.Extension() != ".html" {
+					saveAs := filepath.Join(".", filepath.Base(tmp)+mime.Extension())
+					err = os.Rename(tmp, saveAs)
+					if err != nil {
+						log.Printf("cannot move file: %s", err)
+					}
+					return
+				}
+
+				htm, err := renameHTML(tmp)
 				if err != nil {
 					log.Printf("rename %s failed: %s", tmp, err)
 					return
@@ -108,13 +126,14 @@ func run(c *cobra.Command, texts []string) error {
 			})
 		}
 
+		_ = fd.Close()
 		_ = group.Wait()
 	}
 
 	return nil
 }
 
-func renameAsHTML(tmp string) (rename string, err error) {
+func renameHTML(tmp string) (rename string, err error) {
 	fd, err := os.Open(tmp)
 	if err != nil {
 		return
@@ -135,7 +154,7 @@ func renameAsHTML(tmp string) (rename string, err error) {
 	index := 0
 	for {
 		if index > 0 {
-			rename = fmt.Sprintf("%s[%d].html", title, index)
+			rename = fmt.Sprintf("%s.%d.html", title, index)
 		} else {
 			rename = fmt.Sprintf("%s.html", title)
 		}
