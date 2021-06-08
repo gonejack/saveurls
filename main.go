@@ -25,7 +25,7 @@ import (
 var (
 	verbose = false
 
-	exec = &cobra.Command{
+	cmd = &cobra.Command{
 		Use:   "saveurls *.txt",
 		Short: "Command line tool for fetching url as html",
 		Run: func(c *cobra.Command, args []string) {
@@ -39,9 +39,8 @@ var (
 
 func init() {
 	log.SetOutput(os.Stdout)
-	exec.Flags().BoolVarP(&verbose, "verbose", "v", false, "verbose")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "verbose")
 }
-
 func run(c *cobra.Command, texts []string) error {
 	if len(texts) == 0 {
 		return fmt.Errorf("no urls given")
@@ -62,61 +61,60 @@ func run(c *cobra.Command, texts []string) error {
 
 		scan := bufio.NewScanner(fd)
 		for scan.Scan() {
-			text := scan.Text()
+			u := scan.Text()
 
 			_ = batch.Acquire(context.TODO(), 1)
 			group.Go(func() (err error) {
 				defer batch.Release(1)
 
-				uri, err := url.Parse(text)
+				uri, err := url.Parse(u)
 				if err != nil {
-					return err
-				}
-				temp, err := os.CreateTemp("", "temp")
-				if err != nil {
-					return err
+					return
 				}
 
-				ref := uri.String()
-				tmp := temp.Name()
+				tmpfd, err := os.CreateTemp("", "temp")
+				if err != nil {
+					return
+				}
+				tmpfile := tmpfd.Name()
 
 				defer func() {
-					temp.Close()
-					os.Remove(tmp)
+					_ = tmpfd.Close()
+					_ = os.Remove(tmpfile)
 				}()
 
+				ref := uri.String()
 				if verbose {
 					log.Printf("fetch %s", ref)
 				}
 
-				err = get.Download(ref, tmp, time.Minute)
+				err = get.Download(ref, tmpfile, time.Minute)
 				if err != nil {
 					log.Printf("download %s fail: %s", ref, err)
 					return
 				}
 
-				mime, err := mimetype.DetectFile(tmp)
+				mime, err := mimetype.DetectFile(tmpfile)
 				if err != nil {
-					log.Printf("cannnot detect mime of %s: %s", tmp, err)
+					log.Printf("cannnot detect mime of %s: %s", tmpfile, err)
 					return
 				}
-
 				if mime.Extension() != ".html" {
-					saveAs := filepath.Join(".", filepath.Base(tmp)+mime.Extension())
-					err = os.Rename(tmp, saveAs)
+					saveAs := filepath.Join(".", filepath.Base(tmpfile)+mime.Extension())
+					err = os.Rename(tmpfile, saveAs)
 					if err != nil {
 						log.Printf("cannot move file: %s", err)
 					}
 					return
 				}
 
-				htm, err := renameHTML(tmp)
+				htm, err := moveHTML(tmpfile)
 				if err != nil {
-					log.Printf("rename %s failed: %s", tmp, err)
+					log.Printf("rename %s failed: %s", tmpfile, err)
 					return
 				}
 
-				err = pathHTML(ref, htm)
+				err = patchHTML(ref, htm)
 				if err != nil {
 					log.Printf("patch %s fail: %s", htm, err)
 					return
@@ -132,8 +130,7 @@ func run(c *cobra.Command, texts []string) error {
 
 	return nil
 }
-
-func renameHTML(tmp string) (rename string, err error) {
+func moveHTML(tmp string) (rename string, err error) {
 	fd, err := os.Open(tmp)
 	if err != nil {
 		return
@@ -160,7 +157,6 @@ func renameHTML(tmp string) (rename string, err error) {
 		}
 
 		file, err := os.OpenFile(rename, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
-
 		switch {
 		case errors.Is(err, os.ErrExist):
 			index += 1
@@ -173,16 +169,17 @@ func renameHTML(tmp string) (rename string, err error) {
 		}
 	}
 }
-func pathHTML(src, path string) (err error) {
+func patchHTML(src, path string) (err error) {
 	fd, err := os.Open(path)
 	if err != nil {
 		return
 	}
+	defer fd.Close()
+
 	doc, err := goquery.NewDocumentFromReader(fd)
 	if err != nil {
 		return
 	}
-	fd.Close()
 
 	doc.Find("img, link").Each(func(i int, e *goquery.Selection) {
 		var attr string
@@ -206,7 +203,7 @@ func pathHTML(src, path string) (err error) {
 		case strings.HasPrefix(ref, "https://"):
 			return
 		default:
-			e.SetAttr(attr, patchReference(src, ref))
+			e.SetAttr(attr, patchRef(src, ref))
 		}
 	})
 	doc.Find("body").AppendHtml(footer(src))
@@ -223,22 +220,22 @@ func pathHTML(src, path string) (err error) {
 
 	return
 }
-func patchReference(pageRef, imgRef string) string {
+func patchRef(pageRef, imgRef string) string {
 	refURL, err := url.Parse(imgRef)
 	if err != nil {
 		return imgRef
 	}
 
-	linkURL, err := url.Parse(pageRef)
+	pageURL, err := url.Parse(pageRef)
 	if err != nil {
 		return imgRef
 	}
 
 	if refURL.Host == "" {
-		refURL.Host = linkURL.Host
+		refURL.Host = pageURL.Host
 	}
 	if refURL.Scheme == "" {
-		refURL.Scheme = linkURL.Scheme
+		refURL.Scheme = pageURL.Scheme
 	}
 
 	return refURL.String()
@@ -256,14 +253,12 @@ func footer(link string) string {
 	if err != nil {
 		linkText = link
 	}
-	replacer := strings.NewReplacer(
+
+	return strings.NewReplacer(
 		"{link}", link,
 		"{linkText}", html.EscapeString(linkText),
-	)
-
-	return replacer.Replace(tpl)
+	).Replace(tpl)
 }
-
 func main() {
-	_ = exec.Execute()
+	_ = cmd.Execute()
 }
