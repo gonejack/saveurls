@@ -12,13 +12,14 @@ Command line tool for downloading html files.
 
 ### Usage
 ```shell
-> saveurls urls.txt
+> saveurls urls...
 ```
 ```
 Usage:
-  saveurls *.txt [flags]
+  saveurls urls... [flags]
 
 Flags:
-  -v, --verbose   verbose
-  -h, --help      help for saveurls
+  -h, --help          help for saveurls
+  -i, --list string   url list
+  -v, --verbose       verbose
 ```

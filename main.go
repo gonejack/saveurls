@@ -24,9 +24,10 @@ import (
 
 var (
 	verbose = false
+	list    string
 
 	cmd = &cobra.Command{
-		Use:   "saveurls *.txt",
+		Use:   "saveurls urls...",
 		Short: "Command line tool for fetching url as html",
 		Run: func(c *cobra.Command, args []string) {
 			err := run(c, args)
@@ -39,92 +40,95 @@ var (
 
 func init() {
 	log.SetOutput(os.Stdout)
+
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "verbose")
+	cmd.Flags().StringVarP(&list, "list", "i", "", "url list file")
 }
-func run(c *cobra.Command, texts []string) error {
-	if len(texts) == 0 {
+func run(c *cobra.Command, urls []string) error {
+	if list != "" {
+		fd, err := os.Open(list)
+		if err != nil {
+			return err
+		}
+		scan := bufio.NewScanner(fd)
+		for scan.Scan() {
+			urls = append(urls, strings.TrimSpace(scan.Text()))
+		}
+		_ = fd.Close()
+	}
+
+	if len(urls) == 0 {
 		return fmt.Errorf("no urls given")
 	}
 
 	var batch = semaphore.NewWeighted(3)
 	var group errgroup.Group
 
-	for _, txt := range texts {
+	for _, u := range urls {
 		if verbose {
-			log.Printf("processing %s", txt)
+			log.Printf("processing %s", u)
 		}
 
-		fd, err := os.Open(txt)
-		if err != nil {
-			return err
-		}
+		_ = batch.Acquire(context.TODO(), 1)
+		group.Go(func() (err error) {
+			defer batch.Release(1)
 
-		scan := bufio.NewScanner(fd)
-		for scan.Scan() {
-			u := scan.Text()
+			uri, err := url.Parse(u)
+			if err != nil {
+				return
+			}
 
-			_ = batch.Acquire(context.TODO(), 1)
-			group.Go(func() (err error) {
-				defer batch.Release(1)
+			tmpfd, err := os.CreateTemp("", "temp")
+			if err != nil {
+				return
+			}
+			tmpfile := tmpfd.Name()
 
-				uri, err := url.Parse(u)
+			defer func() {
+				_ = tmpfd.Close()
+				_ = os.Remove(tmpfile)
+			}()
+
+			ref := uri.String()
+			if verbose {
+				log.Printf("fetch %s", ref)
+			}
+
+			err = get.Download(ref, tmpfile, time.Minute)
+			if err != nil {
+				log.Printf("download %s fail: %s", ref, err)
+				return
+			}
+
+			mime, err := mimetype.DetectFile(tmpfile)
+			if err != nil {
+				log.Printf("cannnot detect mime of %s: %s", tmpfile, err)
+				return
+			}
+			if mime.Extension() != ".html" {
+				saveAs := filepath.Join(".", filepath.Base(tmpfile)+mime.Extension())
+				err = os.Rename(tmpfile, saveAs)
 				if err != nil {
-					return
+					log.Printf("cannot move file: %s", err)
 				}
+				return
+			}
 
-				tmpfd, err := os.CreateTemp("", "temp")
-				if err != nil {
-					return
-				}
-				tmpfile := tmpfd.Name()
+			htm, err := moveHTML(tmpfile)
+			if err != nil {
+				log.Printf("rename %s failed: %s", tmpfile, err)
+				return
+			}
 
-				defer func() {
-					_ = tmpfd.Close()
-					_ = os.Remove(tmpfile)
-				}()
+			err = patchHTML(ref, htm)
+			if err != nil {
+				log.Printf("patch %s fail: %s", htm, err)
+				return
+			}
 
-				ref := uri.String()
-				if verbose {
-					log.Printf("fetch %s", ref)
-				}
+			return nil
+		})
 
-				err = get.Download(ref, tmpfile, time.Minute)
-				if err != nil {
-					log.Printf("download %s fail: %s", ref, err)
-					return
-				}
-
-				mime, err := mimetype.DetectFile(tmpfile)
-				if err != nil {
-					log.Printf("cannnot detect mime of %s: %s", tmpfile, err)
-					return
-				}
-				if mime.Extension() != ".html" {
-					saveAs := filepath.Join(".", filepath.Base(tmpfile)+mime.Extension())
-					err = os.Rename(tmpfile, saveAs)
-					if err != nil {
-						log.Printf("cannot move file: %s", err)
-					}
-					return
-				}
-
-				htm, err := moveHTML(tmpfile)
-				if err != nil {
-					log.Printf("rename %s failed: %s", tmpfile, err)
-					return
-				}
-
-				err = patchHTML(ref, htm)
-				if err != nil {
-					log.Printf("patch %s fail: %s", htm, err)
-					return
-				}
-
-				return nil
-			})
-		}
-
-		_ = fd.Close()
 		_ = group.Wait()
 	}
 
