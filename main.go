@@ -45,6 +45,14 @@ func init() {
 	cmd.Flags().StringVarP(&list, "list", "i", "", "url list file")
 }
 func run(c *cobra.Command, urls []string) error {
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		scan := bufio.NewScanner(os.Stdin)
+		for scan.Scan() {
+			urls = append(urls, scan.Text())
+		}
+	}
+
 	if list != "" {
 		fd, err := os.Open(list)
 		if err != nil {
