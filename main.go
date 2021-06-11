@@ -255,11 +255,13 @@ func patchRef(pageRef, imgRef string) string {
 func footer(link string) string {
 	const tpl = `
 <br/><br/>
-<a style="display: block; display: inline-block; border-top: 1px solid #ccc; padding-top: 5px; color: #666; text-decoration: none;"
+<div style="margin-left: 2%;">
+<a style="display: inline-block; border-top: 1px solid #ccc; padding-top: 5px; color: #666; text-decoration: none;"
    href="{link}">{linkText}</a>
 <p style="color:#999;">Save with <a style="color:#666; text-decoration:none; font-weight: bold;" 
 									href="https://github.com/gonejack/saveurls">saveurls</a>
-</p>`
+</p>
+</div>`
 
 	linkText, err := url.QueryUnescape(link)
 	if err != nil {
