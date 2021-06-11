@@ -255,7 +255,7 @@ func patchRef(pageRef, imgRef string) string {
 func footer(link string) string {
 	const tpl = `
 <br/><br/>
-<div style="margin-left: 2%;">
+<div style="margin-left: 4px;">
 <a style="display: inline-block; border-top: 1px solid #ccc; padding-top: 5px; color: #666; text-decoration: none;"
    href="{link}">{linkText}</a>
 <p style="color:#999;">Save with <a style="color:#666; text-decoration:none; font-weight: bold;" 
