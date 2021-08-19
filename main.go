@@ -102,7 +102,7 @@ func run(c *cobra.Command, urls []string) error {
 				log.Printf("fetch %s", ref)
 			}
 
-			err = get.Download(ref, tmpfile, time.Minute)
+			err = get.Download(get.NewDownloadTask(ref, tmpfile), time.Minute)
 			if err != nil {
 				log.Printf("download %s fail: %s", ref, err)
 				return
