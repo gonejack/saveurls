@@ -21,6 +21,16 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+func init() {
+	log.SetOutput(os.Stdout)
+}
+func main() {
+	var c saveurl
+	if e := c.run(); e != nil {
+		log.Fatal(e)
+	}
+}
+
 type saveurl struct {
 	Verbose bool     `short:"v" help:"Verbose printing."`
 	List    string   `short:"i" help:"URL list file."`
@@ -263,14 +273,4 @@ func (c *saveurl) footer(link string) string {
 		"{link}", link,
 		"{linkText}", html.EscapeString(linkText),
 	).Replace(tpl)
-}
-
-func init() {
-	log.SetOutput(os.Stdout)
-}
-func main() {
-	var c saveurl
-	if e := c.run(); e != nil {
-		log.Fatal(e)
-	}
 }
