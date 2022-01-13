@@ -1,5 +1,5 @@
 # saveurls
-This command line tool save url as .html files.
+This command line tool save url as .html file.
 
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/gonejack/saveurls)
 ![Build](https://github.com/gonejack/saveurls/actions/workflows/go.yml/badge.svg)
@@ -13,6 +13,9 @@ This command line tool save url as .html files.
 ### Usage
 ```shell
 > saveurls urls...
+```
+```
+> saveurls -i urls.txt
 ```
 ```
 Flags:
