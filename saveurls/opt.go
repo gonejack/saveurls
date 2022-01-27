@@ -2,15 +2,24 @@ package saveurls
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 
 	"github.com/alecthomas/kong"
 )
 
+type about bool
+
+func (a about) BeforeApply() (err error) {
+	fmt.Println("Visit https://github.com/gonejack/inostar")
+	os.Exit(0)
+	return
+}
+
 type Options struct {
 	Verbose bool     `short:"v" help:"Verbose printing."`
-	List    string   `short:"i" default:"urls.txt" help:"URL list file."`
+	List    string   `short:"i" help:"URL list file."`
 	About   bool     `help:"About."`
 	URL     []string `arg:"" optional:""`
 }
@@ -27,6 +36,7 @@ func MustParseOptions() (opt Options) {
 			opt.URL = append(opt.URL, strings.TrimSpace(sc.Text()))
 		}
 	}
+
 	if opt.List != "" {
 		f, err := os.Open(opt.List)
 		if err != nil {

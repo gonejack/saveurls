@@ -28,10 +28,6 @@ type SaveURL struct {
 }
 
 func (c *SaveURL) Run() error {
-	if c.About {
-		fmt.Println("Visit https://github.com/gonejack/saveurls")
-		return nil
-	}
 	if len(c.URL) == 0 {
 		return fmt.Errorf("no urls given")
 	}
