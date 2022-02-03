@@ -6,6 +6,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.7.1
 	github.com/alecthomas/kong v0.2.17
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	golang.org/x/text v0.3.6
 )
 
 require (

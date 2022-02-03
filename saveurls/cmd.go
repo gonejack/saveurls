@@ -19,6 +19,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/text/encoding/htmlindex"
 )
 
 var client = http.Client{}
@@ -38,7 +39,6 @@ func (c *SaveURL) run() error {
 	var grp errgroup.Group
 	for i := range c.URL {
 		u := c.URL[i]
-
 		sema.Acquire(context.TODO(), 1)
 		grp.Go(func() (err error) {
 			defer sema.Release(1)
@@ -71,12 +71,22 @@ func (c *SaveURL) save(ref string) (err error) {
 	}
 	defer rsp.Body.Close()
 
-	ct, _, _ := mime.ParseMediaType(rsp.Header.Get("content-type"))
+	ct, ps, _ := mime.ParseMediaType(rsp.Header.Get("content-type"))
 	if ct != "text/html" {
 		return fmt.Errorf("%s is not HTML page", ref)
 	}
+	var reader io.Reader = rsp.Body
+	if charset, exist := ps["charset"]; exist && charset != "utf-8" {
+		if c.Verbose {
+			log.Printf("decoding %s to utf-8", charset)
+		}
+		enc, err := htmlindex.Get(ps["charset"])
+		if err == nil {
+			reader = enc.NewDecoder().Reader(reader)
+		}
+	}
 
-	body, err := io.ReadAll(rsp.Body)
+	body, err := io.ReadAll(reader)
 	if err != nil {
 		return fmt.Errorf("download failed: %s", err)
 	}
@@ -116,6 +126,12 @@ func (c *SaveURL) save(ref string) (err error) {
 	return
 }
 func (c *SaveURL) patch(url string, doc *goquery.Document) {
+	doc.Find("meta").Each(func(i int, meta *goquery.Selection) {
+		_, exist := meta.Attr("charset")
+		if exist {
+			meta.Remove()
+		}
+	})
 	doc.Find("img,video,source,link").Each(func(i int, e *goquery.Selection) {
 		var attr string
 		switch e.Get(0).Data {
@@ -140,7 +156,9 @@ func (c *SaveURL) patch(url string, doc *goquery.Document) {
 			e.SetAttr(attr, c.patchURL(url, ref))
 		}
 	})
-	doc.Find("body").AppendHtml(c.footer(url))
+	if !c.NoFooter {
+		doc.Find("body").AppendHtml(c.footer(url))
+	}
 }
 func (c *SaveURL) patchURL(pageURL, srcURL string) string {
 	i, err := url.Parse(srcURL)

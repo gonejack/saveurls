@@ -3,6 +3,7 @@ package saveurls
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -18,10 +19,11 @@ func (a about) BeforeApply() (err error) {
 }
 
 type Options struct {
-	Verbose bool     `short:"v" help:"Verbose printing."`
-	List    string   `short:"i" help:"URL list file."`
-	About   bool     `help:"About."`
-	URL     []string `arg:"" optional:""`
+	List     string   `short:"i" help:"URL list file."`
+	NoFooter bool     `help:"Do not append footer"`
+	Verbose  bool     `short:"v" help:"Verbose printing."`
+	About    about    `help:"About."`
+	URL      []string `arg:"" optional:""`
 }
 
 func MustParseOptions() (opt Options) {
@@ -36,7 +38,6 @@ func MustParseOptions() (opt Options) {
 			opt.URL = append(opt.URL, strings.TrimSpace(sc.Text()))
 		}
 	}
-
 	if opt.List != "" {
 		f, err := os.Open(opt.List)
 		if err != nil {
@@ -47,6 +48,15 @@ func MustParseOptions() (opt Options) {
 			opt.URL = append(opt.URL, strings.TrimSpace(sc.Text()))
 		}
 		_ = f.Close()
+	}
+	for i, u := range opt.URL {
+		if !strings.HasPrefix(u, "http") {
+			patched := "http://" + u
+			if opt.Verbose {
+				log.Printf("patch %s as %s", u, patched)
+			}
+			opt.URL[i] = patched
+		}
 	}
 	return
 }
