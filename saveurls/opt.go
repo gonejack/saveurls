@@ -13,7 +13,7 @@ import (
 type about bool
 
 func (a about) BeforeApply() (err error) {
-	fmt.Println("Visit https://github.com/gonejack/inostar")
+	fmt.Println("Visit https://github.com/gonejack/saveurls")
 	os.Exit(0)
 	return
 }
